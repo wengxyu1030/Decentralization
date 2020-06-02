@@ -28,7 +28,14 @@ hr_2<-hr %>% #select and filter hr data: grade, institution
   filter(`Current Grade Group Name`=="GE and up" & 
            `VPU Grouping (New)` != "IGA" & Org=="Bank",  #IGA? NEED EXPAND THE DEF.
          !grepl("EC",`Revised New Grades`) )  %>%
-  mutate(upi = as.numeric(UPI)) %>%
+  mutate(upi = as.numeric(UPI),
+         ctr_duty_iso3c = countrycode(`Duty Country Name`, 
+                             origin = 'country.name',
+                             destination = 'iso3c',
+                             custom_match = c('Kosovo'='KVO',
+                                              'Micronesia'= 'FSM',
+                                              'Yugoslavia'= 'SRB',
+                                              'Serbia and Montenegro' = 'SRB'))) %>%
   select(-Snapshot, -`PMU (Curr)`, -`PMU Name (Curr)`, -`VPU Grouping (New)`,-UPI) 
   
 save(hr_2, file = "data/hr_2.rda")
@@ -74,7 +81,8 @@ length <- trs %>% #use the trs range of fy instead of closing fy
 operation_1 <- read_excel("input/portfolio_second_version_withASA.xlsx",
                           sheet = "Rawdata_Projects&Upi", col_types = "text")%>%
   select(projectid,inst,amount,projectname,ttl_upi,
-         practice,countryname,revclosing_yr,appfy,lending_instrument)
+         practice,countryname,revclosing_yr,appfy,lending_instrument,region) %>%
+  dplyr::rename(rgn_proj = region)
 
 operation_3 <- read_excel("input/PROJECT_MASTER_V2.xlsx", col_types = "text") %>%
   filter(!is.na(COMPLEX_PROJ_IND)) %>%
@@ -83,17 +91,19 @@ operation_3 <- read_excel("input/PROJECT_MASTER_V2.xlsx", col_types = "text") %>
 
 operation <- operation_1 %>%
   left_join(.,operation_3, by = c("projectid" = "PROJ_ID")) %>%
-  left_join(length,by = c("projectid" = "Proj.ID"))
+  left_join(length,by = c("projectid" = "Proj.ID")) %>%
+  mutate(ctr_proj_iso3c = countrycode(countryname, 
+                             origin = 'country.name',
+                             destination = 'iso3c',
+                             custom_match = c('Kosovo'='KVO',
+                                              'Micronesia'= 'FSM',
+                                              'Yugoslavia'= 'SRB',
+                                              'Serbia and Montenegro' = 'SRB')))
 save(operation, file = "data/operation.rda")
 
-#additional financing should be identified with parent project and join?
-
-
-
-
-
-# team data ---------------------------------------------------------------
+# staff_proj_level data ---------------------------------------------------------------
 library(lubridate)
+load("data/trs.rda")
 team_raw <- read_excel("input/PROJECT_TEAM_V2.xlsx")
 
 date_fy <- function(date) {
@@ -163,7 +173,8 @@ staff_pre <- operation %>%  #staff placement and hr info to project+fy level.
   inner_join(.,hr_2, by = c("Employee" = "upi", "fy"="fy"))%>%  
   dplyr::rename(upi = Employee) %>%
   select(fy,projectid,upi,ttl_upi_current,                            
-         ttl,ADM_LEAD_FLAG,`IRS Flag`,`Duty Country Name`,`Title Name`) %>%
+         ttl,ADM_LEAD_FLAG,`IRS Flag`,`Duty Country Name`,ctr_duty_iso3c,`Title Name`,
+         countryname, ctr_proj_iso3c,`Bank Geographical Regions`,rgn_proj) %>%
   mutate(ttl_upi_fy = ifelse(ttl == 1, upi,NA) ) %>%
   distinct() %>%
   group_by(projectid,fy) %>%  
@@ -180,27 +191,43 @@ staff_pre <- operation %>%  #staff placement and hr info to project+fy level.
                           grepl(paste(tech,collapse = "|"), `Title Name`,perl=TRUE, ignore.case=TRUE) ~ "Sector specialists/program managers (PMs)",
                           grepl(paste(plsl,collapse = "|"),`Title Name`,ignore.case = TRUE) ~ "Program/sector leaders",
                           TRUE ~ "CMU")) 
+save(staff_pre, file = "staff_pre.rda")
 
 staff_dec <- staff_pre %>% #test dummies on field prsence of IRS, Functional Staff, Co-TTLs
-  group_by(projectid) %>%
-  mutate(length = max(fy)-min(fy)+1) %>%
-  group_by(projectid,length) %>%
-  mutate( dec = ifelse(`Duty Country Name` == "United States",0,1),
-          #field prsence of international staff
+  left_join(time_gap,by=c("ctr_proj_iso3c"="iso3c"))%>%
+  dplyr::rename(ctr_proj_utc = utc,
+                rgn_duty = `Bank Geographical Regions`,
+                ctr_proj = countryname,
+                ctr_duty = `Duty Country Name`)%>%
+  left_join(time_gap,by=c("ctr_duty_iso3c"="iso3c"))%>%
+  dplyr::rename(ctr_duty_utc = utc) %>%
+  #the definition of field presence: exclude not in DC not nearby (+-3UTC)
+  mutate( dec = ifelse(ctr_duty != "United States" & 
+                       (rgn_duty == rgn_proj | abs(ctr_proj_utc-ctr_duty_utc)<=3),
+                       1,0)) %>%
+  select(-ctr_proj_utc,-ctr_duty_utc, -rgn_proj, -rgn_duty) %>%
+  #define the field presence by tests
+  
+  mutate(#field prsence of international staff
           irs = ifelse(`IRS Flag` == "Y" & dec == 1, 1, 0),
           #field presence of functional staff on field
           tech = ifelse(type == "Sector specialists/program managers (PMs)"& dec == 1,1,0),
           #field presence of co_ttl
           co_ttl = ifelse(co_ttl == 1 & dec == 1,1,0))%>%
-  summarise_at(vars(irs,tech,co_ttl),sum) %>%
-  mutate(irs = irs/length, 
-            tech = tech/length,
-            co_ttl = co_ttl/length) %>%
-  ungroup() %>%
-  select(-length)
+  distinct(projectid, dec, irs, tech, co_ttl) %>%  
+  group_by(projectid) %>%
+  #as long as there's one type of staff exist on the field, count as 1. 
+  summarise_at(vars(irs,tech,co_ttl),mean)%>% 
+  #later could caculate the intensity: more field staff or less field staff.
+  mutate(irs = ifelse(irs > 0, TRUE, FALSE),
+         tech = ifelse(tech > 0, TRUE, FALSE),
+         co_ttl = ifelse(co_ttl > 0, TRUE, FALSE)) %>%
+  ungroup() 
    
 skim(staff_dec)
-staff_dec %>% mutate_at(vars(irs,tech,co_ttl),log)%>%skim()  
+staff_dec %>% mutate_at(vars(irs,tech,co_ttl),log)%>%skim()  #later
+
+save(staff_dec,file = "data/staff_dec.rda")
 
 # IEG Rating --------------------------------------------------------------
 #IEG Rating data (need the governmence performance rating.)
@@ -218,7 +245,7 @@ rating %>%   #there's duplicating in Rating for project, exclude the duplicated 
   select(Project.ID,IEG_EvalDate,IEG_EvalType)%>%
   anyDuplicated()
 
-perf_vars <- c("IEG_OverallBankPerf","IEG_BankQualityAtEntry","IEG_BankQualityOfSupervision")
+perf_vars <- c("IEG_OverallBankPerf","IEG_BankQualityAtEntry","IEG_BankQualityOfSupervision","IEG_GovernmentPerf")
 
 rating_2 <- rating %>%   #exclude the duplicated case (latest time and exclude "PAR")
   mutate(IEG_EvalDate= as.Date(rating$IEG_EvalDate, "%m/%d/%y"))%>%
@@ -231,13 +258,28 @@ rating_2 <- rating %>%   #exclude the duplicated case (latest time and exclude "
   mutate(join_id = as.numeric(sub(".","",Project.ID))) %>%
   select(var_rate,Project.ID,IEG_EvalFY,join_id,Approval.FY)
 
-save(rating_2,file = "data/rating_2.rda")
+save(rating_2,file = "data/rating_2.rda")  #get the quantitative measure.
 
+rating_4 <- rating_2 %>%  #get the point scale
+  mutate_at(vars(var_rate),as.numeric)%>%
+  select(Project.ID,perf_vars,Approval.FY,IEG_EvalFY) %>%
+  group_by(IEG_EvalFY) %>%
+  filter(n()>1) %>%
+  mutate_at(vars(perf_vars),percent_rank)%>%
+  ungroup()
+skim(rating_4)
+  mutate(prctl_bankperf = percent_rank(n_bankperf),
+         prctl_qentry = percent_rank(n_qentry),
+         prctl_banksup = percent_rank(n_banksup),
+         prctl_bankperf_mix = mean(c(prctl_qentry,prctl_banksup)))%>%
+  ungroup() %>%
+  select()
+  
+save(rating_4,file = "data/rating_4.rda")  #get the quantitative measure.
+  
 
-# control vars ------------------------------------------------------------
+# control vars (ctr) ------------------------------------------------------------
 
-#iso code
-iso <-read_excel("input/iso.xlsx") 
 
 #CPIA data (waiting for update complete data)
 library(data.table)
@@ -254,7 +296,18 @@ for (i in 2002:2018){
   
 cpia_raw <- df %>%  #clean the data
   mutate(Country = toupper(str_trim(Country)),Code = toupper(str_trim(Code)),
-         fy = as.character(fy))
+         fy = as.character(fy),
+         Code = countrycode(Country, 
+                     origin = 'country.name',
+                     destination = 'iso3c',
+                     custom_match = c('KOSOVO'='KVO',
+                                      'MICRONESIA, FS'= 'FSM',
+                                      'YUGOSLAVIA, FR'= 'SRB',
+                                      'SERBIA & MONTENEGRO' = 'SRB',
+                                      "CENTRAL AFR. REP." = 'CAF'))) %>%
+  filter(!is.na(Code))
+
+cpia_raw%>% filter(is.na(iso3c))%>%count(Country)
 
 cpia_ctr <- cpia_raw %>%
   distinct(Country,Code)  #there are different fype of country, suggest all using coutnry code in analysis.
@@ -276,27 +329,59 @@ library(zoo)
 
 cpia <- cpia_id %>%
   left_join(cpia_raw) %>% #need to impute the missing data. 
-  select(-Country) %>%
+  select(-Country)%>%
   mutate(fy = as.numeric(fy))%>% 
   pivot_wider( names_from = Code, values_from = Overall) %>%
   as.ts() %>% 
   na_interpolation(option = "linear")%>%
   as.data.frame() %>%
   pivot_longer(-fy,names_to = "code", values_to = "cpia") %>%
-  left_join(iso,by = c("code" = "iso3")) %>%
-  rename(iso_n = Numeric,
-         iso3 = code)
-  
-#other country level control
+  rename(iso3c = code)   #all iso3 in historic data. 
+
+count(cpia,iso3c) %>% summary() #Every country has 17 years recode. 
+save(cpia, file="data/cpia.rda")   
+
+#other country level control (income and fcv)
 ctr_tag <- read_excel("input/LENDING_PROGRAM_V2.xlsx", col_types = "text")%>%
   #import FCV, Income Group, Lending Group,country tag by fy.
-  distinct(APPRVL_FY,FRAGILE_STATES_CODE,CNTRY_CODE,LNDNG_GRP_CODE,INC_GRP_CODE) %>%
-  rename(iso2 = CNTRY_CODE,
-         fcv = FRAGILE_STATES_CODE,
-         appfy = APPRVL_FY) %>%
-  select(appfy, iso2, fcv) #income group is missing but currently not using it in analysis
+  distinct(APPRVL_FY,FRAGILE_STATES_CODE,CNTRY_CODE,LNDNG_GRP_CODE,INC_GRP_CODE,CNTRY_SHORT_NAME) %>%
+  rename(fcv = FRAGILE_STATES_CODE,
+         appfy = APPRVL_FY,
+         income = INC_GRP_CODE,
+         ctr = CNTRY_SHORT_NAME) %>%
+  mutate(appfy = as.character(appfy),
+         iso3c = countrycode(ctr, 
+                             origin = 'country.name',
+                             destination = 'iso3c',
+                            custom_match = c('Kosovo'='KVO',
+                                             'Micronesia'= 'FSM',
+                                             'Yugoslavia'= 'SRB',
+                                             'Serbia and Montenegro' = 'SRB'))) %>%  #the converged updated iso3c list
+  select(appfy,iso3c,fcv, income, ctr) 
 
-#The time zone data +-3 as nearby.
+skim(ctr_tag) #fcv,income,iso3 are missing for regional projects. (96% completion rate is okay if no region proj.)
+save(ctr_tag,file = "ctr_tag.rda")
+
+#iso code (with historical iso data)
+iso <- ctr_tag %>% 
+  distinct(iso3c,ctr)
+save(iso, file = "data/iso.rda")
+
+#The time zone data by based cities (+-3 as nearby).
+load("data/time_gap.rda")
+
+#ctr level data consolidate
+ctr_tag_final <- ctr_tag %>%
+  mutate(appfy = as.numeric(appfy)) %>%
+  filter(between(appfy,2002,2018)) %>%  #rated projects to 2018
+  left_join(cpia, by = c("iso3c"="iso3c","appfy" = "fy"))
+
+skim(ctr_tag_final)  #0.93 cpia complete. 
+
+ctr_tag_final %>% 
+  filter(is.na(cpia)) %>%
+  #Antigua and Barbuda,Bahamas, The,Antigua and Barbuda no CPIA data. 
+  count(ctr) 
 
 #############Data preparation######
 
