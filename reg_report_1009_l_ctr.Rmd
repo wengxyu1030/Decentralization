@@ -1,0 +1,422 @@
+---
+title: "Decentralization Econometrics Analysis"
+author: "Aline"
+date: "Oct. 9, 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,fig.retina = 2, fig.width = 7, fig.height = 6, message=FALSE,warning=FALSE)
+
+#Compared to reg_report_0908, this version has region instead of country FE, with team member hq presence added as control. 
+#compared to reg_report_0914_rgn, this version is using country FE. 
+#compare to reg_report_0914_l_ctr, this version try to clluster the FE and refine the presentation. 
+
+# load package
+.libPaths("C:/Users/wb500886/Downloads/library")
+library(sjPlot)
+library(sjmisc)
+library(sjlabelled)
+library(tidyverse)
+library(plm)
+library(skimr)
+library(corrplot)
+library(lfe)
+library(broom)
+library(bife)
+library(tibble)
+library(tidyverse)
+library(stargazer)
+library(knitr)
+library(kableExtra)
+
+```
+
+```{r function}
+
+
+reg_table_format <- function(rate,title_text,master) {
+  #prepare data
+  master_fcv <- master %>%
+    filter(fcv> 0)
+  master_n_fcv <- master %>%
+    filter(fcv==0)
+  #control var
+  var_control <- " + cpia + appfy + amount + add_fin + length + member_hq_n_l +practice_grp + ctr_proj"
+  
+  #models
+  m1 <- lm(formula = as.formula(paste0(rate ,"~ tech_irs_n_l",var_control)),data = master)
+  m1_1 <- lm(formula = as.formula(paste0(rate ,"~ tech_irs_n_l*practice_grp ",var_control)),data = master)
+  m1_2 <- lm(formula = as.formula(paste0(rate ,"~ tech_irs_n_l",var_control)),data = master_fcv)
+  m1_2_1 <- lm(formula = as.formula(paste0(rate ,"~ tech_irs_n_l*practice_grp ",var_control)),data = master_fcv)
+  m1_3 <- lm(formula = as.formula(paste0(rate ,"~ tech_irs_n_l ",var_control)),data = master_n_fcv)
+  m1_3_1 <- lm(formula = as.formula(paste0(rate ,"~ tech_irs_n_l*practice_grp",var_control)),data = master_n_fcv)
+
+  m2 <- lm(formula = as.formula(paste0(rate ,"~ tech_lrs_n_l ",var_control)),data = master)
+  m2_1 <- lm(formula = as.formula(paste0(rate ,"~ tech_lrs_n_l*practice_grp",var_control)),data = master)
+  m2_2 <- lm(formula = as.formula(paste0(rate ,"~ tech_lrs_n_l ",var_control)),data = master_fcv)
+  m2_2_1 <- lm(formula = as.formula(paste0(rate ,"~ tech_lrs_n_l*practice_grp ",var_control)),data = master_fcv)
+  m2_3 <- lm(formula = as.formula(paste0(rate ,"~ tech_lrs_n_l ",var_control)),data = master_n_fcv)
+  m2_3_1 <- lm(formula = as.formula(paste0(rate ,"~ tech_lrs_n_l*practice_grp ",var_control)),data = master_n_fcv)
+    
+  m3 <- lm(formula = as.formula(paste0(rate ,"~ ttl_irs_n_l",var_control)),data = master)
+  m3_1 <- lm(formula = as.formula(paste0(rate ,"~ ttl_irs_n_l*practice_grp ",var_control)),data = master)
+  m3_2 <- lm(formula = as.formula(paste0(rate ,"~ ttl_irs_n_l ",var_control)),data = master_fcv)
+  m3_2_1 <- lm(formula = as.formula(paste0(rate ,"~ ttl_irs_n_l*practice_grp ",var_control)),data = master_fcv)
+  m3_3 <- lm(formula = as.formula(paste0(rate ,"~ ttl_irs_n_l ",var_control)),data = master_n_fcv)
+  m3_3_1 <- lm(formula = as.formula(paste0(rate ,"~ ttl_irs_n_l*practice_grp ",var_control)),data = master_n_fcv)
+  
+  m4<- lm(formula = as.formula(paste0(rate ,"~ ttl_lrs_n_l",var_control)),data = master)
+  m4_1 <- lm(formula = as.formula(paste0(rate ,"~ ttl_lrs_n_l*practice_grp",var_control)),data = master)
+  m4_2 <- lm(formula = as.formula(paste0(rate ,"~ ttl_lrs_n_l",var_control)),data = master_fcv)
+  m4_2_1 <- lm(formula = as.formula(paste0(rate ,"~ ttl_lrs_n_l*practice_grp ",var_control)),data = master_fcv)
+  m4_3 <- lm(formula = as.formula(paste0(rate ,"~ ttl_lrs_n_l ",var_control)),data = master_n_fcv)
+  m4_3_1 <- lm(formula = as.formula(paste0(rate ,"~ ttl_lrs_n_l*practice_grp",var_control)),data = master_n_fcv)
+  
+  
+  stargazer(m1,m1_1,m1_2,m1_2_1,m1_3,m1_3_1, 
+            m2,m2_1,m2_2,m2_2_1,m2_3,m2_3_1, 
+            m3,m3_1,m3_2,m3_2_1,m3_3,m3_3_1,
+            m4,m4_1,m4_2,m4_2_1,m4_3,m4_3_1,
+          title = title_text,
+          dep.var.labels.include = FALSE,
+          dep.var.caption = "",
+          type = "html", 
+          covariate.labels = c("Operational Staff Field Presence (IRS)","Operational Staff Field Presence (LRS)","TTL Field Presence (IRS)","TTL Field Presence (LRS)",
+                               "CPIA","Approval FY","Project Size (Logged Net Commitment Millions)","Additional Financing","Project Duration","Team Member HQ Presence"),
+          omit = "ctr_proj|_ctr$|Constant",
+          add.lines = list(c("Fixed Effects: Country",
+                             "Yes","Yes","Yes","Yes","Yes","Yes",
+                             "Yes","Yes","Yes","Yes","Yes","Yes",
+                             "Yes","Yes","Yes","Yes","Yes","Yes",
+                             "Yes","Yes","Yes","Yes","Yes","Yes"),
+                           c("Fixed Effects: Sector",
+                             "Yes","Yes","Yes","Yes","Yes","Yes",
+                             "Yes","Yes","Yes","Yes","Yes","Yes",
+                             "Yes","Yes","Yes","Yes","Yes","Yes",
+                             "Yes","Yes","Yes","Yes","Yes","Yes")),
+          column.labels = c("Operational (IRS)",
+                            "Operational (IRS FCS)",
+                            "Operational (IRS Non-FCS)",
+                            "Operational (LRS)",
+                            "Operational (LRS FCS)",
+                            "Operational (LRS Non-FCS)",
+                            "TTL (IRS",
+                            "TTL (IRS FCS)",
+                            "TTL (IRS Non-FCS)",
+                            "TTL (LRS",
+                            "TTL (LRS FCS)",
+                            "TTL (LRS Non-FCS)"),
+          column.separate = c(2,2,2,2,2,2,2,2,2,2,2,2),
+          notes = "Standard errors in parentheses. * p<0.1, ** p<0.05, *** p<0.01.",
+          notes.append = FALSE, 
+          keep.stat = c("n","adj.rsq")
+          )
+} #this is by type of staff
+
+
+```
+
+```{r data}
+load("data/master.rda")
+load("data/master_sup.rda")
+load("data/master_ent.rda")
+load("data/staff_pre.rda")
+load("data/rating_4.rda")
+
+```
+
+## Summary statistics
+1. Variables: Independent variables(dummy) + Dependent variables(pct) + control variables (cpia, length, add_fin, amount,fcv); No FE.
+
+
+```{r summary,results='asis', message = FALSE}
+
+dep <- c("rate_outcome","rate_entry","rate_superv") #"rate_bankpfr",
+ind <- c("tech_n_l","tech_irs_n_l","tech_lrs_n_l"，
+         "cd_ctr_dm",  #"cm_ctr_dm",
+         "ttl_n_l","ttl_irs_n_l","ttl_lrs_n_l",
+         "member_hq_n_l")
+control <- c("cpia","length","add_fin","amount","fcv")
+
+summary_table <- function(df,title_text) {
+#prepare data
+df <- df %>%
+  filter(!is.na(ctr_proj_iso3c))
+
+master_format <- df %>%
+  select(dep,ind,control) %>%
+  rename(`Outcome Rating` = rate_outcome,
+         `Quality at Entry` = rate_entry,
+         `Quality of Supervision` = rate_superv,
+         `Operational Staff Field Presence` = tech_n_l,
+         `Operational Staff Field Presence (IRS)` = tech_irs_n_l,
+         `Operational Staff Field Presence (LRS)` = tech_lrs_n_l,
+         `Resource Intensity` = cd_ctr_dm,
+         `TTL Field Presence` = ttl_n_l,
+         `TTL Field Presence (IRS)` = ttl_irs_n_l,
+         `TTL Field Presence (LRS)` = ttl_lrs_n_l,
+         `Team Member HQ Presence` = member_hq_n_l,
+         CPIA = cpia,
+         `Project Duration` = length,
+         `Additional Financing` = add_fin,
+         `Project Size (Logged Net Commitment Millions)` = amount,
+         `FCS Status` = fcv) 
+  
+master_format %>% 
+  as.data.frame() %>%
+  stargazer(type = "html", title= title_text, digits=1, out.header=TRUE,
+            summary.stat = c("n","mean","sd","min","max"),
+            column.sep.width = "40pt")
+}
+
+
+summary_table(master,"Table 1.1. Summary Statistics")
+
+summary_table(master_ent,"Table 1.2. Summary Statistics (Preparation: the duration from project start to approval FY)")
+
+summary_table(master_sup,"Table 1.3. Summary Statistics (Supervision: the duration from project approval FY to end)")
+
+```
+
+## Result tables
+
+
+
+```{r all,results='asis', message = FALSE}
+
+#vars
+model <- " ~ tech_irs_n_l + tech_lrs_n_l + ttl_irs_n_l + ttl_lrs_n_l + cd_ctr_dm + cpia + appfy + amount + add_fin + length + member_hq_n_l+ practice_grp + ctr_proj"
+
+#models
+  #all staff (outcome)
+master_use <- master %>%
+    rename(`Outcome Rating` = rate_outcome,
+           `Quality at Entry` = rate_entry,
+           `Quality of Supervision` = rate_superv)
+master_fcv <- master_use %>%
+    filter(fcv>0)
+master_n_fcv <- master_use %>%
+    filter(fcv==0) 
+m1 <- lm(formula = as.formula(paste0("`Outcome Rating`",model)), data = master_use)
+m2 <- lm(formula = as.formula(paste0("`Outcome Rating`",model)), data = master_fcv)
+m3 <- lm(formula = as.formula(paste0("`Outcome Rating`",model)), data = master_n_fcv)
+
+  #all staff (entry)
+master_use <- master_ent %>%
+    rename(`Outcome Rating` = rate_outcome,
+           `Quality at Entry` = rate_entry,
+           `Quality of Supervision` = rate_superv)
+master_fcv <- master_use %>%
+    filter(fcv>0)
+master_n_fcv <- master_use %>%
+    filter(fcv==0) 
+m4 <- lm(formula = as.formula(paste0("`Quality at Entry`",model)), data = master_use)
+m5 <- lm(formula = as.formula(paste0("`Quality at Entry`",model)), data = master_fcv)
+m6 <- lm(formula = as.formula(paste0("`Quality at Entry`",model)), data = master_n_fcv)
+
+  #all staff (supervision)
+master_use <- master_sup %>%
+    rename(`Outcome Rating` = rate_outcome,
+           `Quality at Entry` = rate_entry,
+           `Quality of Supervision` = rate_superv)
+master_fcv <- master_use %>%
+    filter(fcv>0)
+master_n_fcv <- master_use %>%
+    filter(fcv==0) 
+m7 <- lm(formula = as.formula(paste0("`Quality of Supervision`",model)), data = master_use)
+m8 <- lm(formula = as.formula(paste0("`Quality of Supervision`",model)), data = master_fcv)
+m9 <- lm(formula = as.formula(paste0("`Quality of Supervision`",model)), data = master_n_fcv)
+  
+  stargazer(m1,m2,m3, m4,m5,m6, m7,m8,m9,
+          title = "Table 2. Presence of All Type of Staff on Outcome Rating, Quality at Entry, and Quality of Supervision",
+          dep.var.labels.include = TRUE,
+          dep.var.caption = "",
+          type = "html", 
+          covariate.labels = c("Operational Staff Field Presence (IRS)","Operational Staff Field Presence (LRS)","TTL Field Presence (IRS)","TTL Field Presence (LRS)","Resource Intensity",
+                               "CPIA","Approval FY","Project Size (Logged Net Commitment Millions)","Additional Financing","Project Duration","Team Member HQ Presence"),
+          omit = "ctr_proj|_ctr$|Constant|practice_grp",
+          add.lines = list(c("Fixed Effects: Country",
+                             "Yes","Yes","Yes","Yes","Yes","Yes",
+                             "Yes","Yes","Yes"),
+                           c("Fixed Effects: Sector",
+                             "Yes","Yes","Yes","Yes","Yes","Yes",
+                             "Yes","Yes","Yes")),
+          column.labels = c("All","FCS","Non-FCS",
+                            "All","FCS","Non-FCS",
+                            "All","FCS","Non-FCS"),
+          notes = "Standard errors in parentheses. * p<0.1, ** p<0.05, *** p<0.01.",
+          notes.append = FALSE, 
+          keep.stat = c("n","adj.rsq")
+          )
+
+
+```
+
+
+```{r other_test,results='asis', message = FALSE}
+
+#function
+reg_table_format_oth <- function(rate,title_text,master) {
+
+#control var
+var_control <- "+ cpia + appfy + amount + add_fin + length + member_hq_n_l+ practice_grp + rgn_proj"
+#professional_irs
+master_oth <- master %>%
+  rename(var_test = tech_irs_n_l) %>%
+  mutate(dpl = ifelse(appfy <= 2004,NA,dpl))
+  
+m1 <- lm(formula = as.formula(paste0(rate ," ~ var_test*dpl",var_control)),data = master_oth)
+m2 <- lm(formula = as.formula(paste0(rate ," ~ var_test*income_n ",var_control)),data = master_oth)
+m3 <- lm(formula = as.formula(paste0(rate ," ~ var_test*ctr_ptf",var_control)),data = master_oth)
+#m3_1 <- lm(formula = as.formula(paste0(rate ," ~ var_test*cd_ctr_dm",var_control)),data = master_oth)
+
+#professional_lrs
+master_oth <- master %>%
+  rename(var_test = tech_lrs_n_l)%>%
+  mutate(dpl = ifelse(appfy <= 2004,NA,dpl))
+  
+m4 <- lm(formula = as.formula(paste0(rate ," ~ var_test*dpl",var_control)),data = master_oth)
+m5 <- lm(formula = as.formula(paste0(rate ," ~ var_test*income_n ",var_control)),data = master_oth)
+m6 <- lm(formula = as.formula(paste0(rate ," ~ var_test*ctr_ptf",var_control)),data = master_oth)
+#m6_1 <- lm(formula = as.formula(paste0(rate ," ~ var_test*cd_ctr_dm",var_control)),data = master_oth)
+
+#ttl_irs
+master_oth <- master %>%
+  rename(var_test = ttl_irs_n_l)%>%
+  mutate(dpl = ifelse(appfy <= 2004,NA,dpl))
+m7 <- lm(formula = as.formula(paste0(rate ," ~ var_test*dpl",var_control)),data = master_oth)
+m8 <- lm(formula = as.formula(paste0(rate ," ~ var_test*income_n ",var_control)),data = master_oth)
+m9 <- lm(formula = as.formula(paste0(rate ," ~ var_test*ctr_ptf",var_control)),data = master_oth)
+#m9_1 <- lm(formula = as.formula(paste0(rate ," ~ var_test*cd_ctr_dm",var_control)),data = master_oth)
+
+#ttl_lrs
+master_oth <- master %>%
+  rename(var_test = ttl_lrs_n_l)%>%
+  mutate(dpl = ifelse(appfy <= 2004,NA,dpl))
+m10 <- lm(formula = as.formula(paste0(rate ," ~ var_test*dpl",var_control)),data = master_oth)
+m11 <- lm(formula = as.formula(paste0(rate ," ~ var_test*income_n ",var_control)),data = master_oth)
+m12 <- lm(formula = as.formula(paste0(rate ," ~ var_test*ctr_ptf",var_control)),data = master_oth)
+#m12_1 <- lm(formula = as.formula(paste0(rate ," ~ var_test*cd_ctr_dm",var_control)),data = master_oth)
+
+
+stargazer(m1,m2,m3, m4,m5,m6, m7,m8,m9, m10,m11,m12,
+          title = title_text,
+          dep.var.labels.include = FALSE,
+          dep.var.caption = "",
+          type = "html", 
+          keep = "^var_test|dpl|income_n|ctr_ptf|cd_ctr_dm",
+          covariate.labels = c("Main Estimate","Interact: DPL","Interact: Income","Interact: Ctr. Portfolio Size","DPL","Income Level","Country Portfolio Size","Resource Intensity"),
+          add.lines = list(c("Fixed Effects: Region","Yes","Yes","Yes","Yes","Yes","Yes","Yes","Yes","Yes","Yes","Yes","Yes"),
+                           c("Fixed Effects: Sector","Yes","Yes","Yes","Yes","Yes","Yes","Yes","Yes","Yes","Yes","Yes","Yes")),
+          column.labels = c("Operational (IRS)", 
+                            "Operational (LRS)",
+                            "TTL (IRS)",
+                            "TTL (LRS)"),
+          column.separate = c(3,3,3,3),
+          notes = "Standard errors in parentheses, regression control for CPIA, project Approval FY, project size, Additional Financing status, project duration, and team member HQ presence.For models testing DPL projects, the sample restricted to post-FY2004 for DPL instrument definition consistency. Coefficients suppressed in output. * p<0.1, ** p<0.05, *** p<0.01.",
+          notes.append = FALSE,
+          keep.stat = c("n","adj.rsq"))
+}
+
+
+#model table
+reg_table_format_oth(rate = "rate_outcome", title_text = "Table 3. Other Interactions: Outcome Rating", master = master)
+reg_table_format_oth(rate = "rate_entry", title_text = "Table 4. Other Interactions: Quality at Entry", master = master_ent)
+reg_table_format_oth(rate = "rate_superv", title_text = "Table 5. Other Interactions: Quality of Supervision", master = master_sup)
+```
+
+
+
+```{r entry,results='asis', message = FALSE}
+reg_table_format(rate = "rate_outcome", title_text = "Table 6. Presence of Staff by Type on Outcome Rating", master = master)
+
+reg_table_format(rate = "rate_entry", title_text = "Table 7. Presence of Staff by Type on Quality at Entry (before Approval FY)", master = master_ent)
+
+reg_table_format(rate = "rate_superv", title_text = "Table 8. Presence of Staff by Type on Quality of Supervision (after Approval FY)", master = master_sup)
+```
+
+```{r reg_rgn, results = 'asis',message=FALSE}
+#function
+reg_table_format_rgn <- function(rate,title_text,master){
+
+master_afr<- master %>%
+  filter(rgn_proj == "AFR")  
+master_eap<- master %>%
+  filter(rgn_proj == "EAP") 
+master_eca<- master %>%
+  filter(rgn_proj == "ECA") 
+master_lcr<- master %>%
+  filter(rgn_proj == "LCR")  
+master_mna<- master %>%
+  filter(rgn_proj == "MNA")  
+master_sar<- master %>%
+  filter(rgn_proj == "SAR")  
+
+var_control <- "+ cpia + appfy + amount + add_fin + length + member_hq_n_l +practice_grp + ctr_proj"
+
+m0 <- lm(formula = as.formula(paste0(rate ,"~ tech_irs_n_l",var_control)),data = master)
+m1 <- lm(formula = as.formula(paste0(rate ,"~ tech_irs_n_l",var_control)),data = master_afr)
+m2 <- lm(formula = as.formula(paste0(rate ,"~ tech_irs_n_l",var_control)),data = master_eap)
+m3 <- lm(formula = as.formula(paste0(rate ,"~ tech_irs_n_l",var_control)),data = master_eca)
+m4 <- lm(formula = as.formula(paste0(rate ,"~ tech_irs_n_l",var_control)),data = master_lcr)
+m5 <- lm(formula = as.formula(paste0(rate ,"~ tech_irs_n_l",var_control)),data = master_mna)
+m6 <- lm(formula = as.formula(paste0(rate ,"~ tech_irs_n_l",var_control)),data = master_sar)
+
+m7 <- lm(formula = as.formula(paste0(rate ,"~ tech_lrs_n_l",var_control)),data = master)
+m8 <- lm(formula = as.formula(paste0(rate ,"~ tech_lrs_n_l",var_control)),data = master_afr)
+m9 <- lm(formula = as.formula(paste0(rate ,"~ tech_lrs_n_l",var_control)),data = master_eap)
+m10 <- lm(formula = as.formula(paste0(rate ,"~ tech_lrs_n_l",var_control)),data = master_eca)
+m11 <- lm(formula = as.formula(paste0(rate ,"~ tech_lrs_n_l",var_control)),data = master_lcr)
+m12<- lm(formula = as.formula(paste0(rate ,"~ tech_lrs_n_l",var_control)),data = master_mna)
+m13 <- lm(formula = as.formula(paste0(rate ,"~ tech_lrs_n_l",var_control)),data = master_sar)
+
+m14 <- lm(formula = as.formula(paste0(rate ,"~ ttl_irs_n_l",var_control)),data = master)
+m15 <- lm(formula = as.formula(paste0(rate ,"~ ttl_irs_n_l",var_control)),data = master_afr)
+m16 <- lm(formula = as.formula(paste0(rate ,"~ ttl_irs_n_l",var_control)),data = master_eap)
+m17 <- lm(formula = as.formula(paste0(rate ,"~ ttl_irs_n_l",var_control)),data = master_eca)
+m18 <- lm(formula = as.formula(paste0(rate ,"~ ttl_irs_n_l",var_control)),data = master_lcr)
+m19 <- lm(formula = as.formula(paste0(rate ,"~ ttl_irs_n_l",var_control)),data = master_mna)
+m20 <- lm(formula = as.formula(paste0(rate ,"~ ttl_irs_n_l",var_control)),data = master_sar)
+
+m21 <- lm(formula = as.formula(paste0(rate ,"~ ttl_lrs_n_l",var_control)),data = master)
+m22 <- lm(formula = as.formula(paste0(rate ,"~ ttl_lrs_n_l",var_control)),data = master_afr)
+m23 <- lm(formula = as.formula(paste0(rate ,"~ ttl_lrs_n_l",var_control)),data = master_eap)
+m24 <- lm(formula = as.formula(paste0(rate ,"~ ttl_lrs_n_l",var_control)),data = master_eca)
+m25 <- lm(formula = as.formula(paste0(rate ,"~ ttl_lrs_n_l",var_control)),data = master_lcr)
+m26 <- lm(formula = as.formula(paste0(rate ,"~ ttl_lrs_n_l",var_control)),data = master_mna)
+m27 <- lm(formula = as.formula(paste0(rate ,"~ ttl_lrs_n_l",var_control)),data = master_sar)
+stargazer(m0,m1,m2,m3,m4,m5,m6,m7,m8,m9,m10,m11,m12,m13,m14,m15,m16,m17,m18,m19,m20,m21,m22,m23,m24,m25,m26,m27,
+          title = title_text,
+          dep.var.labels.include = FALSE,
+          dep.var.caption = "",
+          type = "html", 
+          keep = "^tech|^cd|^cm|^ttl",
+          add.lines = list(c("Fixed Effects: Country",
+                             'yes','yes','yes','yes','yes','yes',
+                             'yes','yes','yes','yes','yes','yes',
+                             'yes','yes','yes','yes','yes','yes',
+                             'yes','yes','yes','yes','yes','yes',
+                             'yes','yes','yes','yes'),
+                           c("Fixed Effects: Sector",
+                             'yes','yes','yes','yes','yes','yes',
+                             'yes','yes','yes','yes','yes','yes',
+                             'yes','yes','yes','yes','yes','yes',
+                             'yes','yes','yes','yes','yes','yes',
+                             'yes','yes','yes','yes')),
+          covariate.labels = c("Operational Staff Field Presence (IRS)","Operational Staff Field Presence (LRS)","TTL Field Presence (IRS)","TTL Field Presence (LRS)"),
+          column.labels = c("All","AFR","EAP","ECA","LCR","MNA","SAR",
+                            "All","AFR","EAP","ECA","LCR","MNA","SAR",
+                            "All","AFR","EAP","ECA","LCR","MNA","SAR",
+                            "All","AFR","EAP","ECA","LCR","MNA","SAR"),
+          notes = "Standard errors in parentheses, regression control for CPIA, project Approval FY, project size, Additional Financing status, project duration, and team member HQ presence. Coefficients suppressed in output. * p<0.1, ** p<0.05, *** p<0.01.",
+          notes.append = FALSE,
+          keep.stat = c("n","adj.rsq"))
+}
+
+#model table
+reg_table_format_rgn(rate = "rate_outcome", title_text = "Table 9. By Region: Outcome Rating", master = master)
+reg_table_format_rgn(rate = "rate_entry", title_text = "Table 10. By Region: Quality at Entry", master = master_ent)
+reg_table_format_rgn(rate = "rate_superv", title_text = "Table 11. By Region: Quality of Supervision", master = master_sup)
+
+```
